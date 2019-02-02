@@ -1,0 +1,34 @@
+Description: Create a role and instance profile for EC2 instances launched by CFN ElasticBeanStalk
+# Letting CFN decide the EC2Role name and EC2EBSProfile name
+
+Resources:
+
+  EC2Role:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier'
+        - 'arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker'
+        - 'arn:aws:iam::aws:policy/AWSElasticBeanstalkWorkerTier'
+      
+  EC2EBSProfile: 
+    Type: "AWS::IAM::InstanceProfile"
+    Properties: 
+      Path: "/"
+      Roles: 
+        - 
+          Ref: "EC2Role"
+      
+Outputs:
+ InstanceProfile:
+  Value: !Ref EC2EBSProfile
+  Description: New EC2 instance profile for CFN elasticbeanstalk

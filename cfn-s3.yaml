@@ -1,0 +1,73 @@
+Description: Create an S3 bucket. Can pass a name or let AWS create one. If passing a VPC End point then VPC is only accessible from that point
+
+Parameters:
+
+ BucketName:
+  Type: String
+  Description: Enter S3 bucket name. This needs to be unique across all of AWS. Can also leave it blank and let AWS create one
+  Default: ""
+  
+ VPCEndPoint:
+  Type: String
+  Description:  End point if want access just from that end point or leave it blank
+  Default: ""
+  
+  
+  
+Metadata:
+ AWS::CloudFormation::Interface: # For ordering of how parameters appear in the console
+  ParameterGroups:
+  -
+   Label:
+    default: "VPC EndPoint"
+   Parameters:
+   - VPCEndPoint
+  -
+   Label:
+    default: "S3 info"
+   Parameters:
+   - BucketName
+
+Conditions:
+ HasName: !Not [!Equals [!Ref BucketName,""]]
+ HasVPCEndPoint: !Not [!Equals [!Ref VPCEndPoint,""]]
+
+Resources:
+
+ S3:
+  Type: AWS::S3::Bucket
+  Properties:
+   BucketName: !If [HasName,!Ref BucketName,!Ref "AWS::NoValue"]
+   AccessControl: Private
+   
+ S3BucketPolicy: # Add access from the within the  VPC
+  Condition: HasVPCEndPoint
+  Type: AWS::S3::BucketPolicy
+  Properties: 
+   Bucket: !Ref S3
+   PolicyDocument: 
+    Statement:
+    -
+     Action: "s3:*"
+     Principal: "*"
+     Effect: Allow
+     Resource:
+     - !Sub arn:aws:s3:::${S3}
+     - !Sub arn:aws:s3:::${S3}/*
+     Condition:
+      StringEquals:
+       aws:sourceVpce: !Ref VPCEndPoint
+       
+       
+Outputs:
+
+ S3BucketArn:
+  Value: !GetAtt S3.Arn
+  Description: Bucket Arn
+  
+ S3BucketDomainName:
+  Value: !GetAtt S3.DomainName
+  Description: Bucket DomainName
+
+       
+

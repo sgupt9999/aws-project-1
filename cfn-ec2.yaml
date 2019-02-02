@@ -1,0 +1,112 @@
+Description: Create a new EC2 instance based on Amazon Linux 2 AMI in a VPC created through CF template
+
+Parameters:
+
+  VPCStackName:
+   Type: String
+   Description: Stack Name used for VPC creation where the environment has to be created
+  InstanceType:
+   Type: String
+   Default: "t2.micro"
+  KeyName:
+   Type: AWS::EC2::KeyPair::KeyName
+   Description: The EC2 Key Pair to allow SSH access to the instance
+  ServerName:
+   Type: String
+   Description: Name for the server
+  PasswordAccess:
+   Type: String
+   AllowedValues:
+   - true
+   - false
+   Default: false
+   Description: If password access is allowed for the EC2 instance
+  EC2Password:
+   Type: String
+   Description: If password access allowed then enter the passord for SSH login
+   Default: "Hello"
+   
+Conditions:
+ PasswordAccess: !Equals [!Ref PasswordAccess, "true"]
+ 
+Mappings: 
+ ImageId: # Uaing the Amazon Linux 2 image which uses systemd functionality
+  us-east-1: 
+   "AmazonLinux2": "ami-01e3b8c3a51e88954"
+  us-east-2:
+   "AmazonLinux2": "ami-049ceee18ac22d417"
+  us-west-1:
+   "AmazonLinux2": "ami-0a16c82eb0cc3aad8"
+  us-west-2:
+   "AmazonLinux2": "ami-03c652d3a09856345"
+
+   
+   
+Metadata:
+ AWS::CloudFormation::Interface: # For ordering of how parameters appear in the console
+  ParameterGroups:
+  -
+   Label:
+    default: "VPC Info"
+   Parameters:
+   - VPCStackName
+  -
+   Label:
+    default: "EC2 Info"
+   Parameters:
+    - InstanceType
+    - KeyName
+    - ServerName
+    - PasswordAccess
+    - EC2Password
+
+
+Resources:
+ EC2:
+  Type: AWS::EC2::Instance
+  Properties:
+   ImageId: !FindInMap
+            - ImageId
+            - !Ref AWS::Region
+            - AmazonLinux2
+
+   InstanceType: !Ref InstanceType
+   SubnetId: {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PublicSubnet1"}}
+   #SubnetId: subnet-00d9c8b2e4be0c691
+   KeyName: !Ref KeyName
+   SecurityGroupIds: [{"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-SSHSG"}}]
+   Tags:
+    - Key: Name
+      Value: !Ref ServerName
+
+   UserData:
+    !If
+    - PasswordAccess
+    - "Fn::Base64": !Sub | 
+           #!/bin/bash
+           sed -i "s/^PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config
+           systemctl reload sshd
+           echo ${EC2Password} | passwd --stdin ec2-user
+           yum update -y
+    - "Fn::Base64": !Sub | 
+           #!/bin/bash
+           yum update -y
+    
+Outputs:
+
+ ServerName:
+  Value: !Ref ServerName
+  Description: New EC2 instance created
+  
+ IPAddress:
+  Value: !GetAtt EC2.PublicIp
+  Description: Server IP address
+  
+ KeyName:
+  Value: !Ref KeyName
+  Description: Key for SSH access
+  
+ Password:
+  Condition: PasswordAccess
+  Value: !Ref EC2Password
+  Description: Password to access EC2 server

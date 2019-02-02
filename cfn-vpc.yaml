@@ -1,0 +1,556 @@
+Description: Create a VPC with 3 public subnets open to SSH, HTTP and HTTPS and optional 3 private subnets only accessible from within the VPC. The script will give an error if run in a region with less than 3 AZs
+# Also old accounts which might have AZs which are not part of VPCs will also give an error
+
+
+Parameters:
+ BaseName: 
+  Type: String
+  Description: Enter a basename for all resources
+ VPCCidr:
+  Type: String
+  Default: "10.0.0.0/16"
+  Description: VPC Cidr Block
+ PublicSubnetCidr:
+  Type: CommaDelimitedList
+  Default: "10.0.0.0/24,10.0.1.0/24,10.0.2.0/24"
+  Description: Public Subnet Cidr Block List
+ PrivateSubnets:
+  Type: String
+  Default: false
+  Description: True if need to create private subnets as well
+  AllowedValues:
+  - true
+  - false
+ PrivateSubnetCidr:
+  Type: CommaDelimitedList
+  Default: "10.0.3.0/24,10.0.4.0/24,10.0.5.0/24"
+  Description: Private Subnet Cidr Block List
+ VPCHasEndPointS3:
+  Type: String
+  AllowedValues:
+  - true
+  - false
+  Default: true
+  Description: Create an S3 end point so queries from within the VPC are done internally and faster
+  
+  
+Conditions:
+ PrivateSubnet: !Equals [!Ref PrivateSubnets,"true"]
+ EndPointS3: !Equals [!Ref VPCHasEndPointS3,"true"]
+ 
+ 
+Metadata:
+ AWS::CloudFormation::Interface: # For ordering of how parameters appear int he console
+  ParameterGroups:
+  -
+   Label:
+    default: "VPC Config"
+   Parameters:
+   - BaseName
+   - VPCCidr
+   - PublicSubnetCidr
+   - PrivateSubnets
+   - PrivateSubnetCidr
+   - VPCEndPointS3
+   
+   
+Resources:
+ VPC:
+  Type: AWS::EC2::VPC
+  Properties: 
+   CidrBlock: !Ref VPCCidr
+   EnableDnsSupport: yes
+   EnableDnsHostnames: yes
+   InstanceTenancy: default
+   Tags:
+   - Key: Name
+     Value: !Join ["",[!Ref BaseName,-VPC]]
+ IGW:
+  Type: AWS::EC2::InternetGateway
+  Properties: 
+   Tags:
+   - Key: Name
+     Value: !Join ["",[!Ref BaseName,-IGW]]
+ IGWAttachment:
+  Type: AWS::EC2::VPCGatewayAttachment
+  Properties: 
+   InternetGatewayId: !Ref IGW
+   VpcId: !Ref VPC
+   
+###  PUBLIC SUBNET SETTING
+
+
+# Create 3 public subnets. One per AZ. The number of AZs varies per region
+# Also not every user can create subnets in every AZ
+# Right now this script assumes Oregon region and the user running the script 
+# can use the 3 AZs in that region
+ PublicSubnet1: 
+  Type: "AWS::EC2::Subnet"
+  Properties: 
+    VpcId: !Ref VPC
+    CidrBlock: !Select [0,!Ref PublicSubnetCidr]
+    AvailabilityZone: 
+      Fn::Select: 
+        - 0
+        - Fn::GetAZs: !Ref 'AWS::Region'
+    MapPublicIpOnLaunch: yes
+    Tags:
+    - Key: Name
+      Value: !Join ["",[!Ref BaseName,-PublicSubnet-1]]
+ PublicSubnet2: 
+  Type: "AWS::EC2::Subnet"
+  Properties: 
+    VpcId: !Ref VPC
+    CidrBlock: !Select [1,!Ref PublicSubnetCidr]
+    AvailabilityZone: 
+      Fn::Select: 
+        - 1
+        - Fn::GetAZs: !Ref 'AWS::Region'
+    MapPublicIpOnLaunch: yes
+    Tags:
+    - Key: Name
+      Value: !Join ["",[!Ref BaseName,-PublicSubnet-2]]
+ PublicSubnet3: 
+  Type: "AWS::EC2::Subnet"
+  Properties: 
+    VpcId: !Ref VPC
+    CidrBlock: !Select [2,!Ref PublicSubnetCidr]
+    AvailabilityZone: 
+      Fn::Select: 
+        - 2
+        - Fn::GetAZs: !Ref 'AWS::Region'
+    MapPublicIpOnLaunch: yes
+    Tags:
+    - Key: Name
+      Value: !Join ["",[!Ref BaseName,-PublicSubnet-3]] 
+      
+# Create a public ACL
+ VPCPublicACL:
+  Type: AWS::EC2::NetworkAcl
+  Properties:
+   VpcId: !Ref VPC
+   Tags:
+   - Key: Name
+     Value: !Join ["",[!Ref BaseName,-PublicACL]]
+ VPCPublicIngressACLEntry:
+  Type: AWS::EC2::NetworkAclEntry
+  Properties:
+   CidrBlock: "0.0.0.0/0"
+   NetworkAclId: !Ref VPCPublicACL
+   Protocol: -1
+   RuleNumber: 100
+   RuleAction: allow
+   PortRange: 
+    From: 0
+    To: 65535
+ VPCPublicEgressACLEntry:
+  Type: AWS::EC2::NetworkAclEntry
+  Properties:
+   CidrBlock: "0.0.0.0/0"
+   NetworkAclId: !Ref VPCPublicACL
+   Egress: true
+   Protocol: -1
+   RuleNumber: 100
+   RuleAction: allow
+   PortRange: 
+    From: 0
+    To: 65535
+    
+    
+# Associate the public subnets to the new public ACL
+ PublicSubnet1ACLAssocation:
+  Type: AWS::EC2::SubnetNetworkAclAssociation
+  Properties:
+   NetworkAclId: !Ref VPCPublicACL
+   SubnetId: !Ref PublicSubnet1
+ PublicSubnet2ACLAssocation:
+  Type: AWS::EC2::SubnetNetworkAclAssociation
+  Properties:
+   NetworkAclId: !Ref VPCPublicACL
+   SubnetId: !Ref PublicSubnet2
+ PublicSubnet3ACLAssocation:
+  Type: AWS::EC2::SubnetNetworkAclAssociation
+  Properties:
+   NetworkAclId: !Ref VPCPublicACL
+   SubnetId: !Ref PublicSubnet3
+   
+   
+# Create a new security group, as cannot change the name and tags on the default security group from this script
+ VPCPublicSecurityGroup:
+  Type: AWS::EC2::SecurityGroup
+  Properties:
+   GroupName: !Join ["",[!Ref BaseName,-DefaultPublicSG]]
+   GroupDescription: Allow traffic to ports 22,80 and 443 from all
+   VpcId: !Ref VPC
+   SecurityGroupIngress:
+   -
+    IpProtocol: tcp
+    FromPort: 22
+    ToPort: 22
+    CidrIp: 0.0.0.0/0
+    Description: Allow SSH access from all
+   -
+    IpProtocol: tcp
+    FromPort: 80
+    ToPort: 80
+    CidrIp: 0.0.0.0/0
+    Description: Allow HTTP access from all
+   -
+    IpProtocol: tcp
+    FromPort: 443
+    ToPort: 443
+    CidrIp: 0.0.0.0/0
+    Description: Allow HTTPS access from all
+   Tags:
+   - Key: Name
+     Value: !Join ["",[!Ref BaseName,-DefaultPublicSG]]
+     
+# Create a new security group with just SSH access
+ VPCSSHSecurityGroup:
+  Type: AWS::EC2::SecurityGroup
+  Properties:
+   GroupName: !Join ["",[!Ref BaseName,-SSHSG]]
+   GroupDescription: Allow traffic to port 22 from all
+   VpcId: !Ref VPC
+   SecurityGroupIngress:
+   -
+    IpProtocol: tcp
+    FromPort: 22
+    ToPort: 22
+    CidrIp: 0.0.0.0/0
+    Description: Allow SSH access from all
+   Tags:
+   - Key: Name
+     Value: !Join ["",[!Ref BaseName,-SSHSG]]
+     
+     
+# Create a new public route table
+ VPCPublicRouteTable:
+  Type: AWS::EC2::RouteTable
+  Properties:
+   VpcId: !Ref VPC
+   Tags:
+   - Key: Name
+     Value: !Join ["",[!Ref BaseName,-PublicRouteTable]] 
+# Add route to internet to the new route table
+ RouteToInternet:
+  Type: AWS::EC2::Route
+  Properties:
+   DestinationCidrBlock: 0.0.0.0/0
+   GatewayId: !Ref IGW
+   RouteTableId: !Ref VPCPublicRouteTable
+   
+   
+# Associate the public subnets to the new route table
+ PublicSubnet1RouteTableAssocation:
+  Type: AWS::EC2::SubnetRouteTableAssociation
+  Properties:
+   RouteTableId: !Ref VPCPublicRouteTable
+   SubnetId: !Ref PublicSubnet1
+ PublicSubnet2RouteTableAssocation:
+  Type: AWS::EC2::SubnetRouteTableAssociation
+  Properties:
+   RouteTableId: !Ref VPCPublicRouteTable
+   SubnetId: !Ref PublicSubnet2
+ PublicSubnet3RouteTableAssocation:
+  Type: AWS::EC2::SubnetRouteTableAssociation
+  Properties:
+   RouteTableId: !Ref VPCPublicRouteTable
+   SubnetId: !Ref PublicSubnet3
+   
+   
+   
+### PRIVATE SUBNET SETTING - ONLY IF SELECTED AT STACK RUN TIME
+### 3 PRIVATE SUBNETS
+### NAT IS ONLY IN ONE SUBNET. 
+
+
+# Create 3 private subnets, only when the option is selected
+ PrivateSubnet1: 
+  Type: "AWS::EC2::Subnet"
+  Condition: PrivateSubnet
+  Properties: 
+    VpcId: !Ref VPC
+    CidrBlock: !Select [0,!Ref PrivateSubnetCidr]
+    AvailabilityZone: 
+      Fn::Select: 
+        - 0
+        - Fn::GetAZs: !Ref 'AWS::Region'
+    Tags:
+    - Key: Name
+      Value: !Join ["",[!Ref BaseName,-PrivateSubnet-1]]
+ PrivateSubnet2: 
+  Type: "AWS::EC2::Subnet"
+  Condition: PrivateSubnet
+  Properties: 
+    VpcId: !Ref VPC
+    CidrBlock: !Select [1,!Ref PrivateSubnetCidr]
+    AvailabilityZone: 
+      Fn::Select: 
+        - 1
+        - Fn::GetAZs: !Ref 'AWS::Region'
+    Tags:
+    - Key: Name
+      Value: !Join ["",[!Ref BaseName,-PrivateSubnet-2]]
+ PrivateSubnet3: 
+  Type: "AWS::EC2::Subnet"
+  Condition: PrivateSubnet
+  Properties: 
+    VpcId: !Ref VPC
+    CidrBlock: !Select [2,!Ref PrivateSubnetCidr]
+    AvailabilityZone: 
+      Fn::Select: 
+        - 2
+        - Fn::GetAZs: !Ref 'AWS::Region'
+    Tags:
+    - Key: Name
+      Value: !Join ["",[!Ref BaseName,-PrivateSubnet-3]]   
+      
+      
+# Create a new Private ACL and associate all private subnets with it
+ VPCPrivateACL:
+  Type: AWS::EC2::NetworkAcl
+  Condition: PrivateSubnet
+  Properties:
+   VpcId: !Ref VPC
+   Tags:
+   - Key: Name
+     Value: !Join ["",[!Ref BaseName,-PrivateACL]]
+ VPCIngressPrivateACLEntry:
+  Type: AWS::EC2::NetworkAclEntry
+  Condition: PrivateSubnet
+  Properties:
+   CidrBlock:  "0.0.0.0/0"
+   NetworkAclId: !Ref VPCPrivateACL
+   Protocol: -1
+   RuleNumber: 100
+   RuleAction: allow
+   PortRange: 
+    From: 0
+    To: 65535
+ VPCEgressPrivateACLEntry:
+  Type: AWS::EC2::NetworkAclEntry
+  Condition: PrivateSubnet
+  Properties:
+   CidrBlock: "0.0.0.0/0"
+   Egress: true
+   NetworkAclId: !Ref VPCPrivateACL
+   Protocol: -1
+   RuleNumber: 100
+   RuleAction: allow
+   PortRange: 
+    From: 0
+    To: 65535
+    
+    
+# Associate the private subnets to the new private ACL
+ PrivateSubnet1ACLAssocation:
+  Type: AWS::EC2::SubnetNetworkAclAssociation
+  Condition: PrivateSubnet
+  Properties:
+   NetworkAclId: !Ref VPCPrivateACL
+   SubnetId: !Ref PrivateSubnet1
+ PrivateSubnet2ACLAssocation:
+  Type: AWS::EC2::SubnetNetworkAclAssociation
+  Condition: PrivateSubnet
+  Properties:
+   NetworkAclId: !Ref VPCPrivateACL
+   SubnetId: !Ref PrivateSubnet2
+ PrivateSubnet3ACLAssocation:
+  Type: AWS::EC2::SubnetNetworkAclAssociation
+  Condition: PrivateSubnet
+  Properties:
+   NetworkAclId: !Ref VPCPrivateACL
+   SubnetId: !Ref PrivateSubnet3
+   
+   
+# Create a new security group for private subnets
+ VPCPrivateSecurityGroup:
+  Type: AWS::EC2::SecurityGroup
+  Condition: PrivateSubnet
+  Properties:
+   GroupName: !Join ["",[!Ref BaseName,-DefaultPrivateSG]]
+   GroupDescription: Allow all traffic from within the VPC
+   VpcId: !Ref VPC
+   SecurityGroupIngress:
+   -
+    IpProtocol: -1
+    FromPort: 0
+    ToPort: 65535
+    CidrIp: !Ref VPCCidr
+    Description: Allow all acess from within the VPC
+   Tags:
+   - Key: Name
+     Value: !Join ["",[!Ref BaseName,-DefaultPrivateSG]]
+     
+     
+# Create a new private route table
+ VPCPrivateRouteTable:
+  Type: AWS::EC2::RouteTable
+  Condition: PrivateSubnet
+  Properties:
+   VpcId: !Ref VPC
+   Tags:
+   - Key: Name
+     Value: !Join ["",[!Ref BaseName,-PrivateRouteTable]] 
+     
+     
+# Associate the private subnets to the new route table
+ PrivateSubnet1RouteTableAssocation:
+  Type: AWS::EC2::SubnetRouteTableAssociation
+  Condition: PrivateSubnet
+  Properties:
+   RouteTableId: !Ref VPCPrivateRouteTable
+   SubnetId: !Ref PrivateSubnet1
+ PrivateSubnet2RouteTableAssocation:
+  Type: AWS::EC2::SubnetRouteTableAssociation
+  Condition: PrivateSubnet
+  Properties:
+   RouteTableId: !Ref VPCPrivateRouteTable
+   SubnetId: !Ref PrivateSubnet2
+ PrivateSubnet3RouteTableAssocation:
+  Type: AWS::EC2::SubnetRouteTableAssociation
+  Condition: PrivateSubnet
+  Properties:
+   RouteTableId: !Ref VPCPrivateRouteTable
+   SubnetId: !Ref PrivateSubnet3
+   
+   
+# Configure NAT gateway
+ EIN: # Allocate a new EIN for the NAT gateway
+  Type: AWS::EC2::EIP
+  Condition: PrivateSubnet
+  Properties:
+   Domain: !Ref VPC
+ NAT:
+  Type: AWS::EC2::NatGateway
+  Condition: PrivateSubnet
+  Properties:
+   AllocationId: !GetAtt EIN.AllocationId
+   SubnetId: !Ref PublicSubnet1 # Add NAT to the 1st public subnet
+   Tags:
+   - Key: Name
+     Value: !Join ["",[!Ref BaseName,-NAT]] 
+     
+     
+# Add route to internet via NAT gateway
+ RouteToInternet2:
+  Type: AWS::EC2::Route
+  Condition: PrivateSubnet
+  DependsOn: NAT
+  Properties:
+   DestinationCidrBlock: "0.0.0.0/0"
+   NatGatewayId: !Ref NAT
+   RouteTableId: !Ref VPCPrivateRouteTable
+
+
+### END OF PRIVATE SUBNET SETUP
+
+
+
+
+### SETUP A VPC END POINT FOR S3 ACCESS
+
+ VPCEndPointS3: # Create a VPC end point for accessing S3
+  Type: AWS::EC2::VPCEndpoint
+  Condition: EndPointS3
+  Properties:
+   VpcId: !Ref VPC
+   ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+   RouteTableIds:
+    !If
+    - PrivateSubnet
+    -
+     - !Ref VPCPrivateRouteTable
+     - !Ref VPCPublicRouteTable
+    - 
+     - !Ref VPCPublicRouteTable
+
+
+Outputs:
+ VpcId:
+  Value: !Ref VPC
+  Export: 
+   Name: !Sub ${AWS::StackName}-VPC
+  Description: Id of the new VPC
+ VPCCidr:
+  Value: !Ref VPCCidr
+  Export:
+   Name: !Sub ${AWS::StackName}-VPCCidr
+  Description: VPC Cidr Range
+ PublicSubnet1:
+  Value: !Ref PublicSubnet1
+  Export: 
+   Name: !Sub ${AWS::StackName}-PublicSubnet1
+  Description: Id of the 1st public subnet
+ PublicSubnet2:
+  Value: !Ref PublicSubnet2
+  Export: 
+   Name: !Sub ${AWS::StackName}-PublicSubnet2
+  Description: Id of the 2nd public subnet
+ PublicSubnet3:
+  Value: !Ref PublicSubnet3
+  Export: 
+   Name: !Sub ${AWS::StackName}-PublicSubnet3
+  Description: Id of the 3rd public subnet
+ PublicSecurityGroup:
+  Value: !GetAtt VPCPublicSecurityGroup.GroupId
+  Export:
+   Name: !Sub ${AWS::StackName}-PublicSG
+  Description: Public Security Group associated with the new VPC
+ SSHSecurityGroup:
+  Value: !GetAtt VPCSSHSecurityGroup.GroupId
+  Export:
+   Name: !Sub ${AWS::StackName}-SSHSG
+  Description: SSH Security Group associated with the new VPC
+ PublicRouteTableId: 
+  Value: !Ref VPCPublicRouteTable
+  Export:
+   Name: !Sub ${AWS::StackName}-PublicRouteTable
+ PrivateSubnet1:
+  Condition: PrivateSubnet
+  Value: !Ref PrivateSubnet1
+  Export:
+   Name: !Sub ${AWS::StackName}-PrivateSubnet1
+  Description: Id of the 1st private subnet
+ PrivateSubnet2:
+  Condition: PrivateSubnet
+  Value: !Ref PrivateSubnet2
+  Export:
+   Name: !Sub ${AWS::StackName}-PrivateSubnet2
+  Description: Id of the 2nd private subnet
+ PrivateSubnet3:
+  Condition: PrivateSubnet
+  Value: !Ref PrivateSubnet3
+  Export:
+   Name: !Sub ${AWS::StackName}-PrivateSubnet3
+  Description: Id of the 3rd private subnet
+ PrivateSubnets:
+  Condition: PrivateSubnet
+  Value: !Ref PrivateSubnets
+  Export:
+   Name: !Sub ${AWS::StackName}-PrivateSubnets
+  Description: Does the VPC have private subnets
+ PrivateRouteTableId: 
+  Condition: PrivateSubnet
+  Value: !Ref VPCPrivateRouteTable
+  Export:
+   Name: !Sub ${AWS::StackName}-PrivateRouteTable
+  Description: Private Route Table associated with the new VPC
+ PrivateSecurityGroup:
+  Condition: PrivateSubnet
+  Value: !GetAtt VPCPrivateSecurityGroup.GroupId
+  Export:
+   Name: !Sub ${AWS::StackName}-PrivateSG
+  Description: Private Security Group associated with the new VPC
+ VPCEndPointS3:
+  Condition: EndPointS3
+  Value: !Ref VPCEndPointS3
+  Export:
+   Name: !Sub ${AWS::StackName}-VPCEndPointS3
+  Description: VPC End point for private S3 access
+ StackName:
+  Value: !Ref AWS::StackName
+  Export:
+   Name:  !Sub ${AWS::StackName}-StackName
+  Description: Stack Name

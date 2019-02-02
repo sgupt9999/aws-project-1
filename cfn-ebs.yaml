@@ -1,0 +1,507 @@
+Description:  Create an application Elastic BeanStalk environment with Classic Load Balancer and SSL
+
+
+Parameters:
+
+ VPCStackName:
+  Type: String
+  Description: Stack Name used for VPC creation where the environment has to be created
+
+ ApplicationName:
+  Type: String
+  Description: Enter a name for the application
+
+ EnvironmentName:
+  Type: String
+  Description: Enter the name of the environment
+
+ KeyName:
+  Type: AWS::EC2::KeyPair::KeyName
+  Description: The EC2 Key Pair to allow SSH access to the instance
+
+ Domain:
+  Type: String
+  Description: Domin name for the website i.e. criterian.com. (NOTE THE PERIOD IN THE END)
+
+ CertId:
+  Type: String
+  Description: X509 certificate for the Load Balancer port 443
+  
+ EC2InstanceProfile:
+  Type: String
+  Description: EC2 Instance Profile for ElasticBeanStalk
+
+ Platform:
+  Type: String
+  AllowedValues:
+  - Java
+  - Node.js
+  - PHP
+  - Python
+  Default: Node.js
+  Description: Preconfigured Platform
+
+ ASGMin:
+  Type: String
+  Default: 1
+  Description: Minimum instance size for auto scaling group
+
+ ASGMax:
+  Type: String
+  Default: 3
+  Description: Maximum instance size for auto scaling group
+
+ LoadBalancerLocation:
+  Type: String
+  Default: External
+  AllowedValues:
+  - External
+  - Internal
+  Description: Is the Load Balancer internal or external
+
+ SampleApplicationBucket:
+  Type: String
+  Description: Bucket holding the sample application files to make the initial server configuration
+
+  
+
+Metadata:
+ AWS::CloudFormation::Interface: # For ordering of how parameters appear in the console
+  ParameterGroups:
+  -
+   Label:
+    default: "VPC Info"
+   Parameters:
+   - VPCStackName
+  -
+   Label:
+    default: "Application Info"
+   Parameters:
+    - ApplicationName
+    - EnvironmentName
+    - Platform
+    - SampleApplicationBucket
+  -
+   Label:
+    default: "Load Balancer Information"
+   Parameters:
+    - ASGMin
+    - ASGMax
+    - EC2Role
+    - LoadBalancerLocation
+  -
+   Label:
+    default: "Other Info"
+   Parameters:
+    - KeyName
+    - Domain
+    - CertId
+    - EC2InstanceProfile
+
+    
+
+    
+
+  
+
+Mappings: 
+
+
+
+ Route53HostedZoneID: # This is needed for creating Route 53 Record Set. The ids are published by AWS and are different for Classic/Application and Network Load Balancers
+
+ # Values at https://docs.aws.amazon.com/general/latest/gr/rande.html#elb_region
+
+  us-east-1: 
+
+   "CLB": "Z35SXDOTRQ7X7K"
+
+  us-east-2:
+
+   "CLB": "Z3AADJGX6KTTL2"
+
+  us-west-1:
+
+   "CLB": "Z368ELLRRE2KJ0"
+
+  us-west-2:
+
+   "CLB": "Z1H1FL5HABSF5"
+
+   
+
+ SolutionStack: # This is needed for the default instance config based on the chosen platform. 
+
+ # Definitions at https://docs.aws.amazon.com/elasticbeanstalk/latest/platforms/platforms-supported.html
+ # The definitions at this location might not always be current
+ # Need to make this api call - aws elasticbeanstalk list-available-solution-stacks to get the most recent versions
+
+  Java:
+
+   "Stack": "64bit Amazon Linux 2018.03 v2.8.0 running Java 8"
+
+  Node.js:
+
+   "Stack": "64bit Amazon Linux 2018.03 v4.8.0 running Node.js"
+
+  PHP:
+
+   "Stack": "64bit Amazon Linux 2018.03 v2.8.6 running PHP 7.2"
+
+  Python:
+
+   "Stack": "64bit Amazon Linux 2018.03 v2.8.0 running Python 3.6"
+
+   
+
+ SampleApplicationObject: # This is the zip file containing the sample app
+
+ # Files can be downloaded intoa bucket from https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/RelatedResources.html
+
+  Java:
+
+   "Zip": java-se-jetty-gradle-v3.zip
+
+  Node.js:
+
+   "Zip": nodejs-v1.zip
+
+  PHP:
+
+   "Zip": php-v1.zip
+
+  Python:
+
+   "Zip": python-v1.zip
+
+   
+
+
+
+     
+
+     
+
+Conditions:
+
+ ExternalELB: !Equals [!Ref LoadBalancerLocation, "External"]
+
+ 
+
+     
+
+     
+
+     
+
+Resources:
+
+
+
+# Elastic BranStalk configuration
+
+
+
+
+
+ sampleApplication:
+
+  Type: AWS::ElasticBeanstalk::Application
+
+  Properties:
+
+   ApplicationName: !Ref ApplicationName
+
+   Description: AWS Elastic Beanstalk Sample Application
+
+   
+
+ sampleApplicationVersion:
+
+  Type: AWS::ElasticBeanstalk::ApplicationVersion
+
+  Properties:
+
+   ApplicationName: !Ref sampleApplication
+
+   Description: AWS ElasticBeanstalk Sample Application Version
+
+   SourceBundle:
+
+    S3Bucket: !Ref SampleApplicationBucket
+
+    S3Key: !FindInMap
+
+            - SampleApplicationObject
+
+            - !Ref Platform
+
+            - Zip
+
+      
+
+    
+
+ sampleConfigurationTemplate:
+
+  Type: AWS::ElasticBeanstalk::ConfigurationTemplate
+
+  Properties:
+
+   ApplicationName: !Ref sampleApplication
+
+   Description: AWS ElasticBeanstalk Sample Config Template
+
+   OptionSettings:
+
+    -
+
+     Namespace: "aws:autoscaling:asg"
+
+     OptionName: "MinSize"
+
+     Value: !Ref ASGMin
+
+    -
+
+     Namespace: "aws:autoscaling:asg"
+
+     OptionName: "MaxSize"
+
+     Value: !Ref ASGMax
+
+    -
+
+     Namespace: aws:elasticbeanstalk:environment
+
+     OptionName: EnvironmentType
+
+     Value: LoadBalanced
+
+    -
+
+     Namespace: aws:ec2:vpc
+
+     OptionName: VPCId
+
+     Value: {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-VPC"}}
+
+    -
+
+     Namespace: aws:ec2:vpc
+
+     OptionName: Subnets
+
+     Value: 
+
+      !If
+
+      - ExternalELB
+
+      - !Join [",",[ {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PublicSubnet1"}}, {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PublicSubnet2"}}, {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PublicSubnet3"}}]]
+
+      - !Join [",",[ {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PrivateSubnet1"}}, {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PrivateSubnet2"}}, {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PrivateSubnet3"}}]]
+
+    -
+
+     Namespace: aws:ec2:vpc
+
+     OptionName: ELBSubnets
+
+     Value: 
+
+      !If
+
+      - ExternalELB
+
+      -  !Join [",",[ {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PublicSubnet1"}}, {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PublicSubnet2"}}, {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PublicSubnet3"}}]]
+
+      - !Join [",",[ {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PrivateSubnet1"}}, {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PrivateSubnet2"}}, {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PrivateSubnet3"}}]]
+
+    -
+
+     Namespace: aws:ec2:vpc
+
+     OptionName: AssociatePublicIpAddress
+
+     Value: 
+
+      !If
+
+      - ExternalELB
+
+      - true
+
+      - false
+
+    -
+
+     Namespace: aws:ec2:vpc
+
+     OptionName: ELBScheme # Make the Load balancer internal if selected
+
+     Value: 
+
+      !If
+
+      - ExternalELB
+
+      - AWS::NoValue
+
+      - internal
+
+    -
+
+     Namespace: aws:autoscaling:launchconfiguration
+
+     OptionName: EC2KeyName
+
+     Value: !Ref KeyName
+     
+    -
+
+     Namespace: aws:autoscaling:launchconfiguration
+     OptionName: IamInstanceProfile
+     Value: !Ref EC2InstanceProfile
+
+    -
+
+     Namespace: aws:elb:policies
+
+     OptionName: Stickiness Policy
+
+     Value: true
+
+    -
+
+     Namespace: aws:elb:policies
+
+     OptionName: LoadBalancerPorts #Apply Stickiness policy to all load balancer ports
+
+     Value: all
+
+    -
+
+     Namespace: aws:elb:loadbalancer
+
+     OptionName: CrossZone
+
+     Value: true
+
+    -
+
+     Namespace: aws:elb:listener
+
+     OptionName: ListenerEnabled # Disable the default listening port 80
+
+     Value: false
+
+    -
+
+     Namespace: aws:elb:listener:443
+
+     OptionName: ListenerProtocol
+
+     Value: HTTPS
+
+    - 
+
+     Namespace: aws:elb:listener:443
+
+     OptionName: InstancePort
+
+     Value: 80
+
+    - 
+
+     Namespace: aws:elb:listener:443
+
+     OptionName: InstanceProtocol
+
+     Value: HTTP
+
+    - 
+
+     Namespace: aws:elb:listener:443
+
+     OptionName: SSLCertificateId
+
+     Value: !Ref CertId
+
+    -
+
+     Namespace: aws:elb:listener:443
+
+     OptionName: ListenerEnabled
+
+     Value: true
+
+    
+
+   SolutionStackName: !FindInMap
+
+                       - SolutionStack
+
+                       - !Ref Platform
+
+                       - Stack
+
+   
+
+ sampleEnvironment:
+
+  Type: AWS::ElasticBeanstalk::Environment
+  DependsOn: sampleConfigurationTemplate
+
+  Properties:
+
+   ApplicationName: !Ref sampleApplication
+
+   Description: AWS ElasticBeanstalk Sample Environment
+
+   EnvironmentName: !Ref EnvironmentName
+
+   TemplateName: !Ref sampleConfigurationTemplate
+
+   VersionLabel: !Ref sampleApplicationVersion
+
+   
+
+ RecordSet:
+
+  Type: AWS::Route53::RecordSet # Point domain to the newly created load balancer
+
+  Properties:
+
+   Name: !Ref Domain
+
+   HostedZoneName: !Ref Domain
+
+   Type: A
+
+   AliasTarget:
+
+    HostedZoneId: !FindInMap 
+
+                   - Route53HostedZoneID
+
+                   - !Ref AWS::Region
+
+                   - CLB
+
+    DNSName: !GetAtt sampleEnvironment.EndpointURL
+
+    
+
+    
+
+    
+
+Outputs:
+
+ EndPoint:
+
+  Value: !GetAtt sampleEnvironment.EndpointURL
+
+    
+

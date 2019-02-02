@@ -1,0 +1,157 @@
+Description: Create a new DB instace. Get the VPC information from the VPC stack. The instance can be in public or private subnets
+
+Parameters:
+ VPCStackName:
+  Type: String
+  Description: Stack Name used for VPC creation
+ DBSecurity:
+  Type: String
+  Default: private
+  AllowedValues:
+  - private
+  - public
+  Description: Create DB instance in public or private subnets. If selecting private the VPC should have private subnets defined
+ DBName:
+  Type: String
+  Description: Enter the database name
+ DBUserName:
+  Type: String
+  Description: Enter the admin username
+ DBPassword:
+  Type: String
+  Description: Enter a password for the admin account
+  NoEcho: true
+ DeletionProtection:
+  Type: String
+  Default: true
+  AllowedValues:
+  - true
+  - false
+  Description: Protection against accidental deletion
+  
+Conditions:
+ PrivateDB: !Equals [!Ref DBSecurity,"private"]
+ PublicDB: !Equals [!Ref DBSecurity,"public"] #!Not [!Equals [!Ref DBSecurity,"private"]]
+ 
+Metadata:
+ AWS::CloudFormation::Interface: # For ordering of how parameters appear in the console
+  ParameterGroups:
+  -
+   Label:
+    default: "VPC Info"
+   Parameters:
+   - VPCStackName
+  -
+   Label:
+    default: "DB Config"
+   Parameters:
+   - DBSecurity
+   - DBName
+   - DBUserName
+   - DBPassword
+
+Resources:
+
+ DBSubnet:
+  Type: "AWS::RDS::DBSubnetGroup"
+  Properties: 
+   DBSubnetGroupDescription: DBSubnet group of all public or private subnets in the VPC
+   DBSubnetGroupName: !Join ["",[!Ref DBName,-DBSubnet]]
+   SubnetIds:
+    !If
+    - PrivateDB
+    - 
+     - {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PrivateSubnet1"}}
+     - {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PrivateSubnet2"}}
+     - {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PrivateSubnet3"}}
+    -
+     - {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PublicSubnet1"}}
+     - {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PublicSubnet2"}}
+     - {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-PublicSubnet3"}}
+   Tags:
+   - Key: Name
+     Value: !Join ["",[!Ref DBName,-DBSubnet]]
+     
+ DBSecurityGroup: # Allow access on port 5432 from all or just within the VPC
+  Type: AWS::EC2::SecurityGroup
+  Properties:
+   GroupName: !Join ["",[!Ref DBName,-DBSG]]
+   GroupDescription: 
+    !If
+    - PrivateDB
+    - Allow traffic to port 5432 from within the VPC
+    - Allow traffic to port 5432 from all
+   VpcId: {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-VPC"}}
+   Tags:
+   - Key: Name
+     Value: !Join ["",[!Ref DBName,-DBSG]]
+     
+# Add port 5432 to the security group
+ SecurityGroupDBIngress:
+  Type: AWS::EC2::SecurityGroupIngress
+  Properties:
+   GroupId: !GetAtt DBSecurityGroup.GroupId
+   IpProtocol: tcp
+   FromPort: 5432
+   ToPort: 5432
+   CidrIp: 
+    !If
+    - PrivateDB
+    - {"Fn::ImportValue" : {"Fn::Sub": "${VPCStackName}-VPCCidr"}}
+    - 0.0.0.0/0
+   Description: 
+    !If
+    - PrivateDB
+    - Allow db access from within the VPC
+    - All db access from all
+    
+# Create the DB
+ DB:
+  Type: AWS::RDS::DBInstance
+  Properties:
+   AllocatedStorage: 20
+   StorageType: gp2
+   DBInstanceClass: db.t2.micro
+   DBInstanceIdentifier: !Ref DBName
+   Engine: postgres
+   MultiAZ: yes
+   DeletionProtection: !Ref DeletionProtection
+   PubliclyAccessible: 
+    !If
+    - PrivateDB
+    - no
+    - yes
+   DBSubnetGroupName: !Ref DBSubnet
+   MasterUsername: !Ref DBUserName
+   MasterUserPassword: !Ref DBPassword
+   VPCSecurityGroups:
+   - !Ref DBSecurityGroup
+   BackupRetentionPeriod: 7
+   PreferredBackupWindow: 09:00-10:00 # US West Coast 2am-3am, UTC -7
+   AutoMinorVersionUpgrade: true
+   PreferredMaintenanceWindow: Sun:08:00-Sun:09:00 # US West Coast Sundays 1am-2am, UTC -7
+   Tags:
+   - Key: Name
+     Value: !Ref DBName
+     
+     
+Outputs:
+
+ DBInstance:
+  Value: !Ref DBName
+  Description: New database name
+  
+ EndPoint:
+  Value: !GetAtt DB.Endpoint.Address
+  Description: New database endpoint
+  
+ Username:
+  Value: !Ref DBUserName
+  Description: admin username
+  
+ Password:
+  Value: !Ref DBPassword
+  Description: admin password
+  
+ 
+  

@@ -1,11 +1,11 @@
-** AWS Project 1 <br>**
-** ============= **
+** AWS Project 1 **
+
 
 
 ** Create a new VPC, RDS, Elastic Beanstalk environment and an S3 bucket **
 * VPC gives an option to create public or private&public subnets
 * Elastic Beanstalk gives an option to create a JAVA, PHP, Python or Node.js environment
-* The cfn.* files don't require any inputs, unless the hardcoded values have to be changed
+* The cfn files don't require any inputs, unless the hardcoded values have to be changed
 * All hardcoded values are in cfn-ebs.yaml
 * All user inputs are in create.py files
 * There is no script to delete or modify. Those will have to be run from the console

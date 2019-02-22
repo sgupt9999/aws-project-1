@@ -34,6 +34,7 @@ basename = 'cmei'
 privatesubnets = 'true'
 
 ## rds stack pareameters
+create_rds = "no" ## "yes" or "no"
 dbsecurity = 'public' # Create either private or public DB
 dbname = 'testdb'
 dbusername = 'myadmin'
@@ -44,8 +45,8 @@ deletionprotection = 'false'
 applicationname = 'testapp'
 environmentname = 'testapp-dev'
 keyname = 'Oregon-1'
-domain = 'cmeisystems.com.'
-certid = 'arn:aws:acm:us-west-2:310471513752:certificate/0be5c56b-f510-43fc-bf29-088d8b03f072'
+domain = 'cmeisystems.com.' ## Note the "." and the end of the domain name
+certid = 'arn:aws:acm:us-west-2:310471513752:certificate/02226d28-232b-4094-a8df-7f281f7c129f'
 sampleappbucket = 'cmei-sample-applications-oregon'
 # The following list has to match the mapping in the ebs stack definiton
 samplecode = [['Java','https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/samples/java-se-jetty-gradle-v3.zip','java-se-jetty-gradle-v3.zip'],\
@@ -131,23 +132,25 @@ print('Elastic Beanstalk stack created successfully')
 #print(ebs)
 
 ## Create RDS stack
-print('Creating rds stack')
-rds_file = open('./cfn-rds.yaml')
-rds_template = rds_file.read()
-response_rds = client.create_stack(StackName=rds_stackname,TemplateBody=rds_template,Parameters=[{'ParameterKey':'VPCStackName','ParameterValue':vpc_stackname},\
+if create_rds == "yes":
+	print('Creating rds stack')
+	rds_file = open('./cfn-rds.yaml')
+	rds_template = rds_file.read()
+	response_rds = client.create_stack(StackName=rds_stackname,TemplateBody=rds_template,Parameters=[{'ParameterKey':'VPCStackName','ParameterValue':vpc_stackname},\
 					{'ParameterKey':'DBSecurity','ParameterValue':dbsecurity},\
 					{'ParameterKey':'DBName','ParameterValue':dbname},\
 					{'ParameterKey':'DBUserName','ParameterValue':dbusername},\
 					{'ParameterKey':'DBPassword','ParameterValue':dbpassword},\
 					{'ParameterKey':'DeletionProtection','ParameterValue':deletionprotection}\
 					])
-rds_waiter = client.get_waiter('stack_create_complete')
-try:
-	rds_waiter.wait(StackName = response_rds['StackId'])
-except:
-	print('RDS Stack creation failed. Exiting the script')
-	exit(1)
-rds = client.describe_stack_resources(StackName=rds_stackname)
-print('RDS stack created successfully')
-#print(rds)
+	rds_waiter = client.get_waiter('stack_create_complete')
+	try:
+		rds_waiter.wait(StackName = response_rds['StackId'])
+	except:
+		print('RDS Stack creation failed. Exiting the script')
+		exit(1)
+	rds = client.describe_stack_resources(StackName=rds_stackname)
+	print('RDS stack created successfully')
+	#print(rds)
+
 print('All stacks successfully completed')

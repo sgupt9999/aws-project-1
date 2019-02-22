@@ -138,19 +138,19 @@ Mappings:
 
   Java:
 
-   "Stack": "64bit Amazon Linux 2018.03 v2.8.0 running Java 8"
+   "Stack": "64bit Amazon Linux 2018.03 v2.8.1 running Java 8"
 
   Node.js:
 
-   "Stack": "64bit Amazon Linux 2018.03 v4.8.0 running Node.js"
+   "Stack": "64bit Amazon Linux 2018.03 v4.8.1 running Node.js"
 
   PHP:
 
-   "Stack": "64bit Amazon Linux 2018.03 v2.8.6 running PHP 7.2"
+   "Stack": "64bit Amazon Linux 2018.03 v2.8.7 running PHP 7.2"
 
   Python:
 
-   "Stack": "64bit Amazon Linux 2018.03 v2.8.0 running Python 3.6"
+   "Stack": "64bit Amazon Linux 2018.03 v2.8.1 running Python 3.6"
 
    
 
